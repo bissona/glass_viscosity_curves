@@ -1,0 +1,188 @@
+import plotly.graph_objects as go
+import ipywidgets as widgets
+import numpy as np
+import pandas as pd
+import plotly.express as px
+
+# Define glass object to get viscosity plotted
+class Glass():
+    def __init__(self,name,fulcher): 
+        # name: string
+        # fulcher: triple (A,B,T0), with A,B,T0 float values for viscosity in Poise and T in C
+        self.name=name
+        self.A=fulcher[0]
+        self.B=fulcher[1]
+        self.T0=fulcher[2]
+        self.liq=''
+    def eta(self,T):
+        # T: temperature in C
+        # eta : viscosity in Poise
+        eta=10**(self.A+self.B/(T-self.T0))
+        return np.round(eta)
+    def temp(self,eta):
+        # eta: viscosity in Poise
+        # temp in C
+        temp=self.B/(np.log10(eta)-self.A)+self.T0
+        temp=np.round(temp*10)/10
+        return temp
+    def __repr__(self):
+        return(f'Glass code : {self.name}\nFulcher coef.:\nA : {self.A}\nB : {self.B}\nT0: {self.T0} ')
+
+#List of compositions for test
+df=pd.DataFrame(data=[['Fused silica',-2.49,15004,253],['Soda lime',-1.65,4312.8,252.9,1120]],columns=['Glass', 'A', 'B', 'T0', 'Liquidus Temp'])  
+
+# Base figure definition
+fi=go.FigureWidget()
+fi.layout.title='Viscosity curves comparison'
+fi.layout.legend.title.text='Glass codes'
+fi.layout.colorway=px.colors.sequential.Rainbow #px.colors.qualitative.Vivid
+fi.layout.showlegend=True
+fi.layout.yaxis={'type':'log',
+                  'exponentformat': 'power',
+                 'title':'Viscosity (Poise)',
+                  'range':[2,15],'tickfont':{'size':10}
+                 }
+fi.layout.xaxis={'title':'Temperature (C)',
+                'tickfont':{'size':10}}
+
+cust_tr=go.Scatter(line={'color':'red'},visible=False)
+fi.add_traces([cust_tr])
+cust_id=fi.data[0].uid
+
+
+#Functions for plots update
+
+l_select=[] # List for compositions selection
+
+def add_op(color,opacity=0):
+    # Changes an rgb color to an rgba, allowing the use of opacity (0:transparent, 1:opaque)
+    if color[0:4]=='rgb(':
+        l=color[4:-1].split(',')
+        return f'rgba({l[0]},{l[1]},{l[2]},{opacity})'
+    else: return color
+
+def response(change):
+    # What to do upon a change in the multi select or check box state
+    #Look at previous multi select state to keep selection order on graph
+    if change['type'] == 'change' and change['name'] == 'value' and type(change['new'])!=bool:
+        for elem in change['new']:
+            if elem not in l_select:
+                l_select.append(elem)
+        for elem in l_select:
+            if elem not in change['new']:
+                l_select.remove(elem)
+    #Reset traces on figure, only keeping custom trace
+    n_d=[]
+    for d in (fi.data):
+        if d.uid==cust_id:
+            n_d.append(d)
+    n_d=tuple(n_d)   
+    fi.data=n_d
+    # For each trace, will plot only on a given viscosity range
+    eta_min=10**2
+    eta_max=10**15
+    lc=iter(px.colors.sequential.Rainbow) # Choose colorway to keep same for trace and liquidus marker
+    for gl in l_select:
+        col=next(lc)
+        r=df[df.Glass==gl].values[0]
+        glass=Glass(r[0],r[1:4])
+        T=np.linspace(glass.temp(eta_min),glass.temp(eta_max),25)
+        eta=glass.eta(T)
+        fi.add_scatter(x=T, y=eta,name=glass.name,line={'color':col})
+        # Only plot if checkbox selected and liquidus value present in list
+        if show_liquidus.value:
+            if not np.isnan(r[4]):
+                fi.add_scatter(x=[r[4]],y=[glass.eta(r[4])],mode='markers',showlegend=False,
+                               marker={'color':add_op(col,0.5),'line':{'color':col,'width':1},'symbol':'diamond','size':6})
+                
+def add_custom(change):
+    
+    for d in fi.data:
+        if d.uid==cust_id: 
+            if show_custom.value: 
+                glass=Glass(cust_name.value,(VFT_A.value,VFT_B.value,VFT_T0.value))
+                eta_min=10**2
+                eta_max=10**15
+                T=np.linspace(glass.temp(eta_min),glass.temp(eta_max),25)
+                eta=glass.eta(T)
+                d.x=T
+                d.y=eta
+                d.name=glass.name
+                d.visible=True
+            else :d.visible=False
+
+list_comp=df.Glass.unique().tolist()
+list_comp.sort()
+
+# Dropdown for glasses selection
+glasses= widgets.SelectMultiple(
+    description='Compositions:   ',
+    options=list_comp, 
+    disabled=False,
+    rows=round(len(list_comp)/2),
+    layout={'width': 'max-content'})
+# Show liquidus checkbox
+show_liquidus = widgets.Checkbox(
+    description='Show liquidus ',
+    value=True,)
+
+select = widgets.HBox(children=[glasses])
+
+# Sliders for custom glass name and VFT parameters
+cust_name=widgets.Text(
+    value='',
+    placeholder='Enter custom name then adjust A,B,T0 values',
+    description='Custom glass:',
+    disabled=False
+)
+VFT_A=widgets.FloatSlider(
+    value=-1.5,
+    min=-5,
+    max=-1,
+    step=0.05,
+    description=' A',
+    disabled=False,
+    continuous_update=True,
+    orientation='horizontal',
+    readout=True,
+    readout_format='.1f',
+)
+VFT_B=widgets.FloatSlider(
+    value=3000,
+    min=2000,
+    max=20000,
+    step=100,
+    description=' B',
+    disabled=False,
+    continuous_update=True,
+    orientation='horizontal',
+    readout=True,
+    readout_format='.1f',
+)
+VFT_T0=widgets.FloatSlider(
+    value=250,
+    min=0,
+    max=500,
+    step=5,
+    description=' T0',
+    disabled=False,
+    continuous_update=True,
+    orientation='horizontal',
+    readout=True,
+    readout_format='.1f',
+)
+# Show custom curve
+show_custom = widgets.Checkbox(
+    description='Show custom curve ',
+    value=False,)
+custom=widgets.VBox(children=[show_liquidus,cust_name,VFT_A,VFT_B,VFT_T0,show_custom])
+select=widgets.HBox(children=[glasses,custom])
+
+glasses.observe(response, names="value")
+show_liquidus.observe(response, names="value")
+show_custom.observe(add_custom, names="value")
+VFT_A.observe(add_custom,names="value")
+VFT_B.observe(add_custom,names="value")
+VFT_T0.observe(add_custom,names="value")
+widgets.VBox([select,fi])
+
